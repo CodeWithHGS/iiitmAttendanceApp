@@ -1,0 +1,8 @@
+{
+  "name": "BEE Attendance",
+  "description": "Attendance system for IIITM.",
+  "requestFramePermissions": [
+    "publickey-credentials-create",
+    "publickey-credentials-get"
+  ]
+}

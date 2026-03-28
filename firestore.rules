@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {uid}
+    // Fields: name, email, rollNumber, branch, joinedAt
+    //
+    // Collection: attendance
+    // Document ID: {YYYY-MM-DD}
+    // Fields: date, dayName, classHeld, presentStudents (array of objects)
+    //
+    // Collection: admins
+    // Document ID: {emailEncoded}
+    // Fields: name, email, password
+    //
+    // Collection: metadata
+    // Document ID: classStats
+    // Fields: totalClassesHeld, lastUpdated
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || ('email' in request.auth.token && request.auth.token.email.lower() == userId.lower()));
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          ('email' in request.auth.token && request.auth.token.email.lower() == "hgskalsi@gmail.com") ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          ('email' in request.auth.token && exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower())))
+        );
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.email.lower() == request.auth.token.email.lower());
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isOwner(userId) || isAdmin();
+    }
+
+    // Attendance records
+    match /attendance/{date} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['presentStudents']) &&
+        request.resource.data.presentStudents.size() == resource.data.presentStudents.size() + 1
+      );
+    }
+
+    // Admin credentials
+    match /admins/{emailEncoded} {
+      allow read: if isAuthenticated(); // For login verification
+      allow write: if isAdmin();
+    }
+
+    // Metadata
+    match /metadata/classStats {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /metadata/networkConfig {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Leave requests
+    match /leaves/{requestId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.uid) || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Student or Admin user profile",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "rollNumber": { "type": "string" },
+        "branch": { "type": "string", "enum": ["BEE"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email", "rollNumber", "branch"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Daily attendance record",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "dayName": { "type": "string" },
+        "classHeld": { "type": "boolean" },
+        "presentStudents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uid": { "type": "string" },
+              "rollNumber": { "type": "string" },
+              "name": { "type": "string" },
+              "markedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "required": ["date", "dayName", "classHeld", "presentStudents"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin credentials",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" }
+      },
+      "required": ["name", "email", "password"]
+    },
+    "LeaveRequest": {
+      "title": "LeaveRequest",
+      "description": "Student leave request",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "rollNumber": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "reason": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "requestedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "rollNumber", "date", "reason", "status", "requestedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/attendance/{date}": {
+      "schema": "AttendanceRecord",
+      "description": "Daily attendance records"
+    },
+    "/admins/{emailEncoded}": {
+      "schema": "Admin",
+      "description": "Admin credentials"
+    },
+    "/leaves/{requestId}": {
+      "schema": "LeaveRequest",
+      "description": "Student leave requests"
+    },
+    "/metadata/classStats": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "totalClassesHeld": { "type": "integer" },
+          "lastUpdated": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Global class statistics"
+    },
+    "/metadata/networkConfig": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "allowedIp": { "type": "string" },
+          "restrictionEnabled": { "type": "boolean" },
+          "lastUpdated": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Network access restrictions"
+    }
+  }
+}
