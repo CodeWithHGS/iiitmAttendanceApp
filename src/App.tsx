@@ -340,6 +340,7 @@ export default function App() {
   const [userIp, setUserIp] = useState<string | null>(null);
   const [networkConfig, setNetworkConfig] = useState<NetworkConfig | null>(null);
   const [isNetworkAuthorized, setIsNetworkAuthorized] = useState(true);
+  const [isIpLoading, setIsIpLoading] = useState(true);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now();
@@ -464,19 +465,26 @@ export default function App() {
 
     // Network Restriction Logic
     const fetchIp = async () => {
+      setIsIpLoading(true);
       try {
         const res = await fetch('https://api.ipify.org?format=json');
         const data = await res.json();
         setUserIp(data.ip);
+        console.log("User IP fetched:", data.ip);
       } catch (err) {
         console.error("Failed to fetch IP:", err);
+        addToast("Failed to detect your network IP. Please refresh.", "error");
+      } finally {
+        setIsIpLoading(false);
       }
     };
     fetchIp();
 
     const unsubNetwork = onSnapshot(doc(db, 'metadata', 'networkConfig'), (doc) => {
       if (doc.exists()) {
-        setNetworkConfig(doc.data() as NetworkConfig);
+        const data = doc.data() as NetworkConfig;
+        console.log("Network config updated:", data);
+        setNetworkConfig(data);
       }
     }, (error) => {
       console.error("Network config listener error:", error);
@@ -489,24 +497,69 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (networkConfig?.restrictionEnabled && userIp) {
-      // Admins bypass network restriction
+    // If restriction is not enabled, everyone is authorized
+    if (networkConfig && !networkConfig.restrictionEnabled) {
+      setIsNetworkAuthorized(true);
+      return;
+    }
+
+    // If restriction is enabled, we need the user's IP and profile to decide
+    if (networkConfig?.restrictionEnabled) {
+      // Admins always bypass network restriction
       if (profile?.role === 'admin') {
         setIsNetworkAuthorized(true);
         return;
       }
+
+      // If we are still loading the IP, we don't authorize yet
+      if (isIpLoading || !userIp) {
+        // We stay authorized for a brief moment while loading to avoid flicker,
+        // but the render logic will handle the final state.
+        // Actually, it's safer to default to authorized=true if we are still loading
+        // but only if we haven't confirmed a mismatch.
+        return;
+      }
       
       const isAuthorized = userIp === networkConfig.allowedIp;
+      console.log(`Network Check: User IP (${userIp}) vs Allowed IP (${networkConfig.allowedIp}) -> ${isAuthorized ? 'MATCH' : 'MISMATCH'}`);
       setIsNetworkAuthorized(isAuthorized);
     } else {
+      // Default to authorized if no config or restriction disabled
       setIsNetworkAuthorized(true);
     }
-  }, [networkConfig, userIp, profile]);
+  }, [networkConfig, userIp, profile, isIpLoading]);
 
   const handleLogout = async () => {
     await signOut(auth);
     setProfile(null);
     addToast("Logged out successfully", "success");
+  };
+
+  const toggleNetworkRestriction = async () => {
+    try {
+      const docRef = doc(db, 'metadata', 'networkConfig');
+      const newState = !networkConfig?.restrictionEnabled;
+      await setDoc(docRef, { 
+        restrictionEnabled: newState,
+        lastUpdated: Timestamp.now()
+      }, { merge: true });
+      addToast(`Network restriction ${newState ? 'enabled' : 'disabled'}`, "success");
+    } catch (err: any) {
+      addToast("Failed to toggle restriction: " + err.message, "error");
+    }
+  };
+
+  const updateNetworkConfig = async (newIp: string) => {
+    try {
+      const docRef = doc(db, 'metadata', 'networkConfig');
+      await setDoc(docRef, {
+        allowedIp: newIp,
+        lastUpdated: Timestamp.now()
+      }, { merge: true });
+      addToast("Network configuration updated", "success");
+    } catch (err: any) {
+      addToast("Failed to update network: " + err.message, "error");
+    }
   };
 
   if (loading) return <Loader />;
@@ -529,7 +582,17 @@ export default function App() {
         ) : !profile ? (
           <Loader onLogout={handleLogout} onRetry={() => user && loadProfile(user)} user={user} />
         ) : profile.role === 'admin' ? (
-          <AdminPortal profile={profile} handleLogout={handleLogout} activeTab={adminTab} setActiveTab={setAdminTab} addToast={addToast} userIp={userIp} />
+          <AdminPortal 
+            profile={profile} 
+            handleLogout={handleLogout} 
+            activeTab={adminTab} 
+            setActiveTab={setAdminTab} 
+            addToast={addToast} 
+            userIp={userIp}
+            networkConfig={networkConfig}
+            toggleNetworkRestriction={toggleNetworkRestriction}
+            updateNetworkConfig={updateNetworkConfig}
+          />
         ) : (
           <StudentPortal profile={profile} handleLogout={handleLogout} addToast={addToast} />
         )}
@@ -712,6 +775,7 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
   const [marking, setMarking] = useState(false);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [hideLogs, setHideLogs] = useState(false);
   const [leaveDate, setLeaveDate] = useState(getTodayDateStr());
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -985,7 +1049,7 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
             </h3>
             <div className="grid grid-cols-7 gap-2">
               {/* Simple heatmap visualization */}
-              {Array.from({ length: 35 }).map((_, i) => {
+              {!hideLogs && Array.from({ length: 35 }).map((_, i) => {
                 const date = new Date();
                 date.setDate(date.getDate() - (34 - i));
                 const dateStr = date.toISOString().split('T')[0];
@@ -1005,6 +1069,9 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
                   />
                 );
               })}
+              {hideLogs && Array.from({ length: 35 }).map((_, i) => (
+                <div key={i} className="aspect-square rounded-md bg-white/5" />
+              ))}
             </div>
             <div className="flex items-center gap-4 mt-6 text-xs text-indigo-200/50">
               <div className="flex items-center gap-1"><div className="w-3 h-3 bg-emerald-500 rounded-sm"></div> Present</div>
@@ -1019,15 +1086,24 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
                 <FileText size={20} className="text-indigo-400" />
                 Recent Logs
               </h3>
-              <button 
-                onClick={() => setShowFullHistory(true)}
-                className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
-              >
-                View All
-              </button>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setHideLogs(!hideLogs)}
+                  className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  {hideLogs ? 'Restore' : 'Clear'}
+                </button>
+                <button 
+                  onClick={() => setShowFullHistory(true)}
+                  disabled={hideLogs}
+                  className={`text-xs font-bold transition-colors ${hideLogs ? 'text-indigo-200/20 cursor-not-allowed' : 'text-indigo-400 hover:text-indigo-300'}`}
+                >
+                  View All
+                </button>
+              </div>
             </div>
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-              {attendance.slice(0, 10).map((record, i) => {
+              {!hideLogs && attendance.slice(0, 10).map((record, i) => {
                 const isPresent = record.presentStudents?.some(s => s.uid === profile.uid);
                 return (
                   <div key={i} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
@@ -1041,7 +1117,11 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
                   </div>
                 );
               })}
-              {attendance.length === 0 && <p className="text-center text-indigo-200/30 py-8">No records found</p>}
+              {(hideLogs || attendance.length === 0) && (
+                <p className="text-center text-indigo-200/30 py-8">
+                  {hideLogs ? 'Logs temporarily cleared' : 'No records found'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1174,7 +1254,17 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
 
 // --- ADMIN PORTAL ---
 
-const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast, userIp }: any) => {
+const AdminPortal = ({ 
+  profile, 
+  handleLogout, 
+  activeTab, 
+  setActiveTab, 
+  addToast, 
+  userIp,
+  networkConfig,
+  toggleNetworkRestriction,
+  updateNetworkConfig
+}: any) => {
   const [students, setStudents] = useState<UserProfile[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [stats, setStats] = useState<ClassStats | null>(null);
@@ -1187,9 +1277,14 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
   const [editName, setEditName] = useState('');
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
-  const [networkConfig, setNetworkConfig] = useState<NetworkConfig | null>(null);
-  const [newAllowedIp, setNewAllowedIp] = useState('');
+  const [newAllowedIp, setNewAllowedIp] = useState(networkConfig?.allowedIp || '');
   const [isUpdatingNetwork, setIsUpdatingNetwork] = useState(false);
+
+  useEffect(() => {
+    if (networkConfig?.allowedIp) {
+      setNewAllowedIp(networkConfig.allowedIp);
+    }
+  }, [networkConfig]);
 
   useEffect(() => {
     const unsubStudents = onSnapshot(collection(db, 'users'), (snap) => {
@@ -1216,23 +1311,12 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
       handleFirestoreError(error, OperationType.LIST, 'leaves');
     });
 
-    const unsubNetwork = onSnapshot(doc(db, 'metadata', 'networkConfig'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data() as NetworkConfig;
-        setNetworkConfig(data);
-        setNewAllowedIp(data.allowedIp || '');
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'metadata/networkConfig');
-    });
-
     setLoading(false);
     return () => {
       unsubStudents();
       unsubAttendance();
       unsubStats();
       unsubLeaves();
-      unsubNetwork();
     };
   }, []);
 
@@ -1426,38 +1510,6 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
     }
   };
 
-  const updateNetworkConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsUpdatingNetwork(true);
-    try {
-      const docRef = doc(db, 'metadata', 'networkConfig');
-      await setDoc(docRef, {
-        allowedIp: newAllowedIp,
-        restrictionEnabled: networkConfig?.restrictionEnabled ?? false,
-        lastUpdated: Timestamp.now()
-      }, { merge: true });
-      addToast("Network configuration updated", "success");
-    } catch (err: any) {
-      addToast("Failed to update network: " + err.message, "error");
-    } finally {
-      setIsUpdatingNetwork(false);
-    }
-  };
-
-  const toggleNetworkRestriction = async () => {
-    try {
-      const docRef = doc(db, 'metadata', 'networkConfig');
-      const newState = !networkConfig?.restrictionEnabled;
-      await setDoc(docRef, {
-        restrictionEnabled: newState,
-        lastUpdated: Timestamp.now()
-      }, { merge: true });
-      addToast(`Network restriction ${newState ? 'enabled' : 'disabled'}`, "success");
-    } catch (err: any) {
-      addToast("Failed to toggle restriction: " + err.message, "error");
-    }
-  };
-
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'date', label: 'By Date', icon: CalendarDays },
@@ -1520,7 +1572,7 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
         <header className="flex items-center justify-between mb-10">
           <div>
             <h2 className="text-3xl font-display font-bold text-slate-900">{navItems.find(i => i.id === activeTab)?.label}</h2>
-            <p className="text-slate-500">Manage BEE Data Strctures Lecture attendance</p>
+            <p className="text-slate-500">Manage BEE Data Structures Lecture attendance</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex items-center gap-2">
@@ -1954,7 +2006,10 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
                       <Settings size={18} className="text-indigo-500" />
                       Configuration
                     </h4>
-                    <form onSubmit={updateNetworkConfig} className="space-y-4">
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      updateNetworkConfig(newAllowedIp);
+                    }} className="space-y-4">
                       <div>
                         <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Authorized Public IP</label>
                         <div className="flex gap-2">
