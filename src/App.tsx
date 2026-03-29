@@ -1258,6 +1258,42 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
   );
 };
 
+// --- BINARY SEARCH HELPERS ---
+const binarySearchPrefix = (arr: any[], query: string, field: 'name' | 'rollNumber') => {
+  if (!query) return arr;
+  const q = query.toLowerCase();
+  
+  let low = 0;
+  let high = arr.length - 1;
+  let firstIdx = -1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const val = (arr[mid][field] || '').toLowerCase();
+    if (val.startsWith(q)) {
+      firstIdx = mid;
+      high = mid - 1;
+    } else if (val < q) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  if (firstIdx === -1) return [];
+
+  const results = [];
+  for (let i = firstIdx; i < arr.length; i++) {
+    const val = (arr[i][field] || '').toLowerCase();
+    if (val.startsWith(q)) {
+      results.push(arr[i]);
+    } else {
+      break;
+    }
+  }
+  return results;
+};
+
 // --- ADMIN PORTAL ---
 
 const AdminPortal = ({ 
@@ -1353,6 +1389,38 @@ const AdminPortal = ({
   const todayRecord = attendance.find(r => r.date === getTodayDateStr());
   const activeStudents = useMemo(() => students.filter(s => !s.deleted), [students]);
   
+  const studentsWithAttendance = useMemo(() => {
+    return activeStudents.map(s => {
+      const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
+      const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
+      const needed = Math.ceil((0.75 * totalClasses - attended) / 0.25);
+      return { ...s, attended, perc, needed };
+    });
+  }, [activeStudents, attendance, totalClasses]);
+
+  const sortedByName = useMemo(() => [...studentsWithAttendance].sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase())), [studentsWithAttendance]);
+  const sortedByRoll = useMemo(() => [...studentsWithAttendance].sort((a, b) => (a.rollNumber || '').toLowerCase().localeCompare((b.rollNumber || '').toLowerCase())), [studentsWithAttendance]);
+
+  const filteredStudents = useMemo(() => {
+    let base = [];
+    if (!searchQuery) {
+      base = studentsWithAttendance;
+    } else {
+      const byName = binarySearchPrefix(sortedByName, searchQuery, 'name');
+      const byRoll = binarySearchPrefix(sortedByRoll, searchQuery, 'rollNumber');
+      
+      const uniqueMap = new Map();
+      byName.forEach(s => uniqueMap.set(s.uid, s));
+      byRoll.forEach(s => uniqueMap.set(s.uid, s));
+      base = Array.from(uniqueMap.values());
+    }
+
+    if (showBelow75Only) {
+      return base.filter(s => s.perc < 75);
+    }
+    return base;
+  }, [searchQuery, sortedByName, sortedByRoll, studentsWithAttendance, showBelow75Only]);
+
   const avgAttendance = useMemo(() => {
     if (totalClasses === 0 || activeStudents.length === 0) return 0;
     const totalAttendances = attendance.reduce((acc, r) => acc + (r.presentStudents?.length || 0), 0);
@@ -1871,17 +1939,7 @@ const AdminPortal = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {students
-                    .filter(s => !s.deleted)
-                    .filter(s => 
-                      (s.name || '').toLowerCase().includes((searchQuery || '').toLowerCase()) || 
-                      (s.rollNumber || '').toLowerCase().includes((searchQuery || '').toLowerCase())
-                    )
-                    .map(s => {
-                      const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
-                      const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
-                      return { ...s, attended, perc };
-                    })
+                  {filteredStudents
                     .sort((a, b) => {
                       const field = sortConfig.field;
                       const dir = sortConfig.direction === 'asc' ? 1 : -1;
@@ -2023,11 +2081,7 @@ const AdminPortal = ({
               </div>
               <div className="text-right">
                 <p className="text-4xl font-display font-bold text-rose-600">
-                  {students.filter(s => {
-                    const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
-                    const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
-                    return perc < 75 && totalClasses > 0;
-                  }).length}
+                  {studentsWithAttendance.filter(s => s.perc < 75 && totalClasses > 0).length}
                 </p>
                 <p className="text-xs text-rose-500 font-bold uppercase tracking-widest">At Risk Students</p>
               </div>
@@ -2044,14 +2098,7 @@ const AdminPortal = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {students
-                    .filter(s => !s.deleted)
-                    .map(s => {
-                      const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
-                      const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
-                      const needed = Math.ceil((0.75 * totalClasses - attended) / 0.25);
-                      return { ...s, perc, needed };
-                    })
+                  {studentsWithAttendance
                     .filter(s => s.perc < 75 && totalClasses > 0)
                     .map((s, i) => (
                       <tr key={i} className="hover:bg-rose-50/30 transition-colors">
@@ -2066,11 +2113,7 @@ const AdminPortal = ({
                         </td>
                       </tr>
                     ))}
-                  {students.filter(s => {
-                    const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
-                    const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
-                    return perc < 75 && totalClasses > 0;
-                  }).length === 0 && (
+                  {studentsWithAttendance.filter(s => s.perc < 75 && totalClasses > 0).length === 0 && (
                     <tr>
                       <td colSpan={4} className="px-8 py-12 text-center text-emerald-500 font-medium italic">All students are currently above 75% eligibility!</td>
                     </tr>
