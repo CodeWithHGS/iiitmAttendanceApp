@@ -1520,7 +1520,7 @@ const AdminPortal = ({ profile, handleLogout, activeTab, setActiveTab, addToast,
         <header className="flex items-center justify-between mb-10">
           <div>
             <h2 className="text-3xl font-display font-bold text-slate-900">{navItems.find(i => i.id === activeTab)?.label}</h2>
-            <p className="text-slate-500">Manage BEE Electrical Engineering Lab attendance</p>
+            <p className="text-slate-500">Manage BEE Data Strctures Lecture attendance</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex items-center gap-2">
