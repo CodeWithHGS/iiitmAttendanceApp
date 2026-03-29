@@ -1351,11 +1351,13 @@ const AdminPortal = ({
 
   const totalClasses = stats?.totalClassesHeld || 0;
   const todayRecord = attendance.find(r => r.date === getTodayDateStr());
+  const activeStudents = useMemo(() => students.filter(s => !s.deleted), [students]);
+  
   const avgAttendance = useMemo(() => {
-    if (totalClasses === 0 || students.length === 0) return 0;
+    if (totalClasses === 0 || activeStudents.length === 0) return 0;
     const totalAttendances = attendance.reduce((acc, r) => acc + (r.presentStudents?.length || 0), 0);
-    return (totalAttendances / (totalClasses * students.length)) * 100;
-  }, [attendance, totalClasses, students]);
+    return (totalAttendances / (totalClasses * activeStudents.length)) * 100;
+  }, [attendance, totalClasses, activeStudents]);
 
   const exportCSV = (date: string) => {
     const record = attendance.find(r => r.date === date);
@@ -1500,8 +1502,20 @@ const AdminPortal = ({
 
   const deleteStudent = async (uid: string) => {
     try {
-      await updateDoc(doc(db, 'users', uid), { deleted: true });
-      addToast("Student removed from system", "success");
+      const idToken = await auth.currentUser?.getIdToken();
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({ uid })
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to delete user");
+
+      addToast("Student deleted from Auth and Database", "success");
       setStudentToDelete(null);
     } catch (err: any) {
       addToast(err.message, "error");
@@ -1648,7 +1662,7 @@ const AdminPortal = ({
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard label="Total Classes" value={totalClasses} icon={Calendar} color="indigo" />
-              <StatCard label="Registered Students" value={students.length} icon={Users} color="blue" />
+              <StatCard label="Registered Students" value={activeStudents.length} icon={Users} color="blue" />
               <StatCard label="Today's Present" value={todayRecord?.presentStudents?.length || 0} icon={CheckCircle} color="emerald" />
               <StatCard label="Avg Attendance" value={avgAttendance.toFixed(1) + '%'} icon={TrendingUp} color="amber" />
             </div>
@@ -1662,7 +1676,7 @@ const AdminPortal = ({
                       <div className="w-full bg-indigo-50 rounded-t-lg relative group">
                         <motion.div 
                           initial={{ height: 0 }}
-                          animate={{ height: `${((r.presentStudents?.length || 0) / students.length) * 100}%` }}
+                          animate={{ height: `${activeStudents.length > 0 ? ((r.presentStudents?.length || 0) / activeStudents.length) * 100 : 0}%` }}
                           className="w-full admin-accent-bg rounded-t-lg"
                         />
                         <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
