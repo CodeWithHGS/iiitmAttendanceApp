@@ -48,6 +48,8 @@ import {
   Download, 
   Settings, 
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Menu,
   X,
   LayoutDashboard,
@@ -1286,6 +1288,7 @@ const AdminPortal = ({
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [newAllowedIp, setNewAllowedIp] = useState(networkConfig?.allowedIp || '');
   const [isUpdatingNetwork, setIsUpdatingNetwork] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ field: string, direction: 'asc' | 'desc' }>({ field: 'rollNumber', direction: 'asc' });
 
   useEffect(() => {
     if (networkConfig?.allowedIp) {
@@ -1512,6 +1515,18 @@ const AdminPortal = ({
     } catch (err: any) {
       addToast(err.message, "error");
     }
+  };
+
+  const handleSort = (field: string) => {
+    setSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const SortArrow = ({ field }: { field: string }) => {
+    if (sortConfig.field !== field) return <div className="w-4 h-4 opacity-20"><ChevronUp size={14} /></div>;
+    return sortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-indigo-600" /> : <ChevronDown size={14} className="text-indigo-600" />;
   };
 
   const clearAllAttendance = async () => {
@@ -1813,10 +1828,30 @@ const AdminPortal = ({
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase tracking-widest font-bold">
                   <tr>
-                    <th className="px-8 py-4">Roll Number</th>
-                    <th className="px-8 py-4">Name</th>
-                    <th className="px-8 py-4">Attended</th>
-                    <th className="px-8 py-4">Percentage</th>
+                    <th className="px-8 py-4 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('rollNumber')}>
+                      <div className="flex items-center gap-2">
+                        Roll Number
+                        <SortArrow field="rollNumber" />
+                      </div>
+                    </th>
+                    <th className="px-8 py-4 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('name')}>
+                      <div className="flex items-center gap-2">
+                        Name
+                        <SortArrow field="name" />
+                      </div>
+                    </th>
+                    <th className="px-8 py-4 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('attended')}>
+                      <div className="flex items-center gap-2">
+                        Attended
+                        <SortArrow field="attended" />
+                      </div>
+                    </th>
+                    <th className="px-8 py-4 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('percentage')}>
+                      <div className="flex items-center gap-2">
+                        Percentage
+                        <SortArrow field="percentage" />
+                      </div>
+                    </th>
                     <th className="px-8 py-4">Status</th>
                     <th className="px-8 py-4">Actions</th>
                   </tr>
@@ -1828,9 +1863,23 @@ const AdminPortal = ({
                       (s.name || '').toLowerCase().includes((searchQuery || '').toLowerCase()) || 
                       (s.rollNumber || '').toLowerCase().includes((searchQuery || '').toLowerCase())
                     )
-                    .map((student, i) => {
-                      const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === student.uid)).length;
+                    .map(s => {
+                      const attended = attendance.filter(r => r.presentStudents?.some(ps => ps.uid === s.uid)).length;
                       const perc = totalClasses > 0 ? (attended / totalClasses) * 100 : 0;
+                      return { ...s, attended, perc };
+                    })
+                    .sort((a, b) => {
+                      const field = sortConfig.field;
+                      const dir = sortConfig.direction === 'asc' ? 1 : -1;
+                      
+                      if (field === 'rollNumber') return (a.rollNumber || '').localeCompare(b.rollNumber || '') * dir;
+                      if (field === 'name') return (a.name || '').localeCompare(b.name || '') * dir;
+                      if (field === 'attended') return (a.attended - b.attended) * dir;
+                      if (field === 'percentage') return (a.perc - b.perc) * dir;
+                      return 0;
+                    })
+                    .map((student, i) => {
+                      const { attended, perc } = student;
                       
                       if (showBelow75Only && perc >= 75) return null;
 
