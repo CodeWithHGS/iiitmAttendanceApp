@@ -659,7 +659,11 @@ const AuthScreen = ({ activeTab, setActiveTab, addToast }: any) => {
         addToast("Welcome back!", "success");
       }
     } catch (err: any) {
-      addToast(err.message, "error");
+      if (err.code === 'auth/operation-not-allowed') {
+        addToast("Login method disabled. Please enable Email/Password in Firebase Console.", "error");
+      } else {
+        addToast(err.message, "error");
+      }
     } finally {
       setLoading(false);
     }
@@ -1275,6 +1279,9 @@ const AdminPortal = ({
   const [manualRoll, setManualRoll] = useState('');
   const [editingStudent, setEditingStudent] = useState<UserProfile | null>(null);
   const [editName, setEditName] = useState('');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearInput, setClearInput] = useState('');
+  const [studentToDelete, setStudentToDelete] = useState<string | null>(null);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [newAllowedIp, setNewAllowedIp] = useState(networkConfig?.allowedIp || '');
@@ -1489,13 +1496,10 @@ const AdminPortal = ({
   };
 
   const deleteStudent = async (uid: string) => {
-    if (!confirm("Are you sure you want to delete this student? This will remove them from the student list.")) return;
     try {
-      // In a real app we might want to delete from Auth too, but here we just remove from Firestore
-      // Or we can mark as deleted. Let's just delete the document for simplicity in this demo.
-      // Actually, let's just use a 'deleted' flag to be safe.
       await updateDoc(doc(db, 'users', uid), { deleted: true });
       addToast("Student removed from system", "success");
+      setStudentToDelete(null);
     } catch (err: any) {
       addToast(err.message, "error");
     }
@@ -1507,6 +1511,35 @@ const AdminPortal = ({
       addToast(`Leave request ${status}`, "success");
     } catch (err: any) {
       addToast(err.message, "error");
+    }
+  };
+
+  const clearAllAttendance = async () => {
+    if (clearInput !== 'DELETE ALL') {
+      addToast("Incorrect confirmation text", "error");
+      return;
+    }
+
+    try {
+      setShowClearConfirm(false);
+      setClearInput('');
+      addToast("Clearing attendance records...", "info");
+      
+      const q = query(collection(db, 'attendance'));
+      const snap = await getDocs(q);
+      
+      const deletePromises = snap.docs.map(d => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+      
+      const statsRef = doc(db, 'metadata', 'classStats');
+      await setDoc(statsRef, {
+        totalClassesHeld: 0,
+        lastUpdated: Timestamp.now()
+      });
+      
+      addToast("All attendance records cleared successfully", "success");
+    } catch (err: any) {
+      addToast("Failed to clear records: " + err.message, "error");
     }
   };
 
@@ -1559,6 +1592,13 @@ const AdminPortal = ({
           >
             <RefreshCw size={20} />
             <span className="font-medium">Recalculate Stats</span>
+          </button>
+          <button 
+            onClick={() => setShowClearConfirm(true)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-all mb-2"
+          >
+            <Trash2 size={20} />
+            <span className="font-medium">Clear All Logs</span>
           </button>
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-all">
             <LogOut size={20} />
@@ -1826,7 +1866,7 @@ const AdminPortal = ({
                                 <Edit size={18} />
                               </button>
                               <button 
-                                onClick={() => deleteStudent(student.uid)}
+                                onClick={() => setStudentToDelete(student.uid)}
                                 className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
                               >
                                 <Trash2 size={18} />
@@ -2306,6 +2346,92 @@ const AdminPortal = ({
                     Save Changes
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Clear Logs Confirmation Modal */}
+      <AnimatePresence>
+        {showClearConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-2xl font-display font-bold text-slate-900 mb-2 text-center">Clear All Records?</h3>
+              <p className="text-slate-500 text-center mb-6">This action is irreversible. All attendance logs will be permanently deleted.</p>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Type "DELETE ALL" to confirm</label>
+                  <input 
+                    type="text" 
+                    value={clearInput}
+                    onChange={e => setClearInput(e.target.value)}
+                    placeholder="DELETE ALL"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500 text-center font-bold"
+                  />
+                </div>
+                <div className="flex gap-4 mt-8">
+                  <button 
+                    onClick={() => {
+                      setShowClearConfirm(false);
+                      setClearInput('');
+                    }}
+                    className="flex-1 px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={clearAllAttendance}
+                    disabled={clearInput !== 'DELETE ALL'}
+                    className="flex-1 px-6 py-3 rounded-xl font-bold bg-rose-600 text-white hover:bg-rose-500 transition-all shadow-lg shadow-rose-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Delete Everything
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Student Confirmation Modal */}
+      <AnimatePresence>
+        {studentToDelete && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-2xl font-display font-bold text-slate-900 mb-2 text-center">Delete Student?</h3>
+              <p className="text-slate-500 text-center mb-6">Are you sure you want to remove this student from the system?</p>
+              
+              <div className="flex gap-4 mt-8">
+                <button 
+                  onClick={() => setStudentToDelete(null)}
+                  className="flex-1 px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => deleteStudent(studentToDelete)}
+                  className="flex-1 px-6 py-3 rounded-xl font-bold bg-rose-600 text-white hover:bg-rose-500 transition-all shadow-lg shadow-rose-200"
+                >
+                  Confirm Delete
+                </button>
               </div>
             </motion.div>
           </div>
