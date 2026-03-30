@@ -191,12 +191,17 @@ const isClassTime = () => {
   if (!CLASS_SCHEDULE.classDays.includes(day)) return { active: false, reason: "No class today" };
 
   const [startH, startM] = CLASS_SCHEDULE.classSlot.startTime.split(':').map(Number);
+  const [endH, endM] = CLASS_SCHEDULE.classSlot.endTime.split(':').map(Number);
+  
   const startTime = new Date(now);
   startTime.setHours(startH, startM, 0, 0);
+  
+  const endTime = new Date(now);
+  endTime.setHours(endH, endM, 0, 0);
 
   const graceMs = CLASS_SCHEDULE.classSlot.graceMinutes * 60 * 1000;
   const startWindow = startTime.getTime() - graceMs;
-  const endWindow = startTime.getTime() + graceMs;
+  const endWindow = endTime.getTime() + graceMs;
   const currentTime = now.getTime();
 
   if (currentTime < startWindow) {
@@ -848,6 +853,12 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
   const neededFor75 = Math.ceil((0.75 * totalClasses - attendedClasses) / 0.25);
 
   const markAttendance = async () => {
+    const classStatus = isClassTime();
+    if (!classStatus.active) {
+      addToast(classStatus.reason, "error");
+      return;
+    }
+
     // Check for approved leave today
     const todayStr = getTodayDateStr();
     const hasApprovedLeave = leaveRequests.some(r => r.date === todayStr && r.status === 'approved');
@@ -963,15 +974,27 @@ const StudentPortal = ({ profile, handleLogout, addToast }: { profile: UserProfi
                       <CheckCircle size={20} />
                       Marked Present
                     </div>
+                  ) : todayRecord?.classHeld ? (
+                    classStatus.active ? (
+                      <button 
+                        onClick={markAttendance}
+                        disabled={marking}
+                        className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-4 rounded-2xl font-bold shadow-lg shadow-emerald-900/20 transition-all pulse-glow flex items-center gap-2"
+                      >
+                        {marking ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <CheckCircle size={20} />}
+                        Mark Attendance
+                      </button>
+                    ) : (
+                      <div className="bg-white/5 text-white/50 px-6 py-3 rounded-2xl flex items-center gap-2 font-medium border border-white/10">
+                        <Clock size={20} />
+                        {classStatus.reason}
+                      </div>
+                    )
                   ) : classStatus.active ? (
-                    <button 
-                      onClick={markAttendance}
-                      disabled={marking}
-                      className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-4 rounded-2xl font-bold shadow-lg shadow-emerald-900/20 transition-all pulse-glow flex items-center gap-2"
-                    >
-                      {marking ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <CheckCircle size={20} />}
-                      Mark Attendance
-                    </button>
+                    <div className="bg-white/5 text-white/50 px-6 py-3 rounded-2xl flex items-center gap-2 font-medium border border-white/10">
+                      <Clock size={20} />
+                      Waiting for admin to start class
+                    </div>
                   ) : (
                     <div className="bg-white/5 text-white/50 px-6 py-3 rounded-2xl flex items-center gap-2 font-medium border border-white/10">
                       <Clock size={20} />
@@ -1801,7 +1824,7 @@ const AdminPortal = ({
                     onClick={() => markClassHeld(selectedDate, true)}
                     className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${attendance.find(r => r.date === selectedDate)?.classHeld ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                   >
-                    Mark Class Held
+                    Start Class
                   </button>
                   <button 
                     onClick={() => markClassHeld(selectedDate, false)}
